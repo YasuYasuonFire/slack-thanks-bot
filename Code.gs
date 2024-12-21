@@ -75,13 +75,12 @@ const CONFIG = {
 function doPost(e) {
   try {
     const payload = parsePayload(e);
+    console.log('受信したペイロード:', JSON.stringify(payload, null, 2));
     
     if (payload.type === "slash_command") {
       return handleSlashCommand(payload);
     } else if (payload.type === "view_submission") {
       return handleViewSubmission(payload);
-    } else if (payload.type === "block_actions") {
-      return handleBlockActions(payload);
     }
     
     return createJsonResponse({ ok: false, error: "不明なペイロードタイプです" });
@@ -91,12 +90,36 @@ function doPost(e) {
   }
 }
 
-// JSONレスポンスを作成するヘルパー関数
+// JSONレスポンスを作成するヘルパー関数を修正
 function createJsonResponse(data) {
-  console.log('レスポンス作成:', JSON.stringify(data, null, 2));
-  const response = ContentService.createTextOutput(JSON.stringify(data))
-    .setMimeType(ContentService.MimeType.JSON);
-  return response;
+  try {
+    console.log('=== レスポンス作成開始 ===');
+    console.log('データ型:', typeof data);
+    console.log('データ構造:', Object.keys(data));
+    console.log('生データ:', data);
+    console.log('JSON文字列化:', JSON.stringify(data, null, 2));
+    
+    // レスポンスオブジェクトの作成
+    const response = ContentService.createTextOutput(JSON.stringify(data))
+      .setMimeType(ContentService.MimeType.JSON);
+    
+    console.log('ContentServiceレスポンス:', {
+      mimeType: response.getMimeType(),
+      content: response.getContent()
+    });
+    console.log('=== レスポンス作成完了 ===');
+    
+    return response;
+  } catch (error) {
+    console.error('=== レスポンス作成エラー ===');
+    console.error('エラー詳細:', {
+      name: error.name,
+      message: error.message,
+      stack: error.stack,
+      inputData: data
+    });
+    throw error;
+  }
 }
 
 // Slashコマンド処理
@@ -104,61 +127,49 @@ function handleSlashCommand(payload) {
   try {
     const view = {
       "type": "modal",
-      "callback_id": "thanks_modal_submission",
+      "callback_id": "test_modal",
       "title": {
         "type": "plain_text",
-        "text": "Send Thanks"
+        "text": "テスト",
+        "emoji": true
       },
       "submit": {
         "type": "plain_text",
-        "text": "送信"
+        "text": "送信",
+        "emoji": true
       },
       "close": {
         "type": "plain_text",
-        "text": "キャンセル"
+        "text": "キャンセル",
+        "emoji": true
       },
       "blocks": [
-        {
-          "type": "input",
-          "block_id": "receiver_block",
-          "element": {
-            "type": "users_select",
-            "action_id": "receiver_select",
-            "placeholder": {
-              "type": "plain_text",
-              "text": "感謝を送りたいユーザーを選択"
-            }
-          },
-          "label": {
-            "type": "plain_text",
-            "text": "受信者"
-          }
-        },
         {
           "type": "input",
           "block_id": "message_block",
           "element": {
             "type": "plain_text_input",
             "action_id": "message_input",
-            "multiline": true,
             "placeholder": {
               "type": "plain_text",
-              "text": "メッセージを入力してください"
+              "text": "メッセージを入力"
             }
           },
           "label": {
             "type": "plain_text",
-            "text": "メッセージ"
+            "text": "メッセージ",
+            "emoji": true
           }
         }
       ]
     };
 
-    callSlackApi("views.open", {
+    const result = callSlackApi("views.open", {
       trigger_id: payload.trigger_id,
       view: view
     });
 
+    console.log('モーダルオープン結果:', result);
     return createJsonResponse({ ok: true });
   } catch (error) {
     console.error('Slashコマンド処理中にエラー:', error);
@@ -169,95 +180,69 @@ function handleSlashCommand(payload) {
 // モーダル送信処理を修正
 function handleViewSubmission(payload) {
   try {
-    console.log('View Submission payload:', JSON.stringify(payload, null, 2));
+    console.log('=== View Submission処理開始 ===');
+    console.log('ペイロード全体:', JSON.stringify(payload, null, 2));
 
-    // ペイロードの検証
-    if (!payload.view?.state?.values) {
-      const error = new Error('無効なペイロード形式です');
-      console.error('ペイロード検証エラー:', error.message, JSON.stringify(payload, null, 2));
-      throw error;
-    }
-
+    // 入力値の取得と検証
     const values = payload.view.state.values;
-    console.log('入力値:', JSON.stringify(values, null, 2));
-    
-    // 入力値の取得
-    const receiver = values.receiver_block?.receiver_select?.selected_user;
-    const message = values.message_block?.message_input?.value;
+    const messageBlock = values.message_block;
+    const messageInput = messageBlock.message_input.value;
 
-    console.log('パース済み入力値:', {
-      receiver,
-      message,
-      user_id: payload.user?.id
+    console.log('入力値:', {
+      messageBlock,
+      messageInput
     });
 
-    // バリデーション
-    const errors = {};
-    if (!receiver) {
-      console.warn('受信者が未選択です');
-      errors["receiver_block"] = "受信者を選択してください";
-    }
-    if (!message) {
-      console.warn('メッセージが未入力です');
-      errors["message_block"] = "メッセージを入力してください";
-    }
-
-    if (Object.keys(errors).length > 0) {
-      console.log('バリデーションエラー:', errors);
-      // バリデーションエラー時は必ずerrorsオブジェクトのみを返す
-      return createJsonResponse({ errors });
+    // 入力値の検証
+    if (!messageInput || messageInput.trim().length === 0) {
+      console.log('バリデーションエラー: メッセージが空');
+      return createJsonResponse({
+        response_action: "errors",
+        errors: {
+          "message_block": "メッセージを入力してください"
+        }
+      });
     }
 
+    // メッセージの送信処理
     try {
-      console.log('メッセージ送信開始:', {
-        to: receiver,
-        from: payload.user.id,
-        message: message
+      console.log('メッセージ送信開始:', messageInput);
+      
+      const messageResult = callSlackApi(SLACK_API.METHODS.CHAT_POST_MESSAGE, {
+        channel: CONFIG.CHANNELS.THANKS_BOARD,
+        text: messageInput,
+        unfurl_links: false
       });
+      
+      console.log('メッセージ送信結果:', messageResult);
 
-      // メッセージ送信
-      const postResult = callSlackApi("chat.postMessage", {
-        channel: receiver,
-        text: `<@${payload.user.id}> からのメッセージ:\n${message}`,
-        blocks: [
-          {
-            "type": "section",
-            "text": {
-              "type": "mrkdwn",
-              "text": `<@${payload.user.id}> からのメッセージ:`
-            }
-          },
-          {
-            "type": "section",
-            "text": {
-              "type": "mrkdwn",
-              "text": message
-            }
-          }
-        ]
-      });
-
-      console.log('メッセージ送信成功:', postResult);
-
-      // 成功時は空のオブジェクトを返す（モーダルを閉じる）
+      // 成功時は空のオブジェクトを返す
+      console.log('=== View Submission処理完了 - 成功 ===');
       return createJsonResponse({});
 
-    } catch (error) {
-      console.error('メッセージ送信エラー:', error.message, error.stack);
-      // APIエラー時はエラーメッセージを表示
+    } catch (sendError) {
+      console.error('メッセージ送信エラー:', sendError);
       return createJsonResponse({
+        response_action: "errors",
         errors: {
-          message_block: `メッセージの送信に失敗しました:\n${error.message}\n\n詳細: ${JSON.stringify(error, null, 2)}`
+          "message_block": "メッセージの送信に失敗しました"
         }
       });
     }
 
   } catch (error) {
-    console.error('モーダル送信処理中の予期せぬエラー:', error.message, error.stack);
-    // 予期せぬエラー時もエラーメッセージを表示
+    console.error('=== View Submission処理エラー ===');
+    console.error('エラー情報:', {
+      name: error.name,
+      message: error.message,
+      stack: error.stack
+    });
+    console.error('エラー時のペイロード:', JSON.stringify(payload, null, 2));
+    
     return createJsonResponse({
+      response_action: "errors",
       errors: {
-        message_block: `予期せぬエラーが発生しました:\n${error.message}\n\nスタックトレース:\n${error.stack}\n\nペイロード:\n${JSON.stringify(payload, null, 2)}`
+        "message_block": "予期せぬエラーが発生しました"
       }
     });
   }
@@ -277,9 +262,7 @@ function handleBlockActions(payload) {
 // Slack API呼び出し
 function callSlackApi(method, payload) {
   const token = PropertiesService.getScriptProperties().getProperty('SLACK_BOT_TOKEN');
-  if (!token) {
-    throw new Error('Slackトークンが設定されていません');
-  }
+  if (!token) throw new Error('Slackトークンが設定されていません');
 
   const response = UrlFetchApp.fetch(`https://slack.com/api/${method}`, {
     method: 'post',
@@ -292,10 +275,7 @@ function callSlackApi(method, payload) {
   });
 
   const result = JSON.parse(response.getContentText());
-  if (!result.ok) {
-    throw new Error(`Slack API エラー (${method}): ${result.error}`);
-  }
-
+  if (!result.ok) throw new Error(`Slack API エラー (${method}): ${result.error}`);
   return result;
 }
 
@@ -306,7 +286,6 @@ function parsePayload(e) {
   }
 
   if (e.postData.type === "application/x-www-form-urlencoded") {
-    // Slashコマンドの場合
     const params = {};
     e.postData.contents.split('&').forEach(pair => {
       const [key, value] = pair.split('=').map(decodeURIComponent);
@@ -316,7 +295,5 @@ function parsePayload(e) {
     return params;
   }
 
-  // インタラクティブペイロードの場合
-  const payload = JSON.parse(e.parameter.payload);
-  return payload;
+  return JSON.parse(e.parameter.payload);
 } 
