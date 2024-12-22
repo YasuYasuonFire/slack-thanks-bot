@@ -122,15 +122,15 @@ function createJsonResponse(data) {
   }
 }
 
-// Slashコマンド処理
+// Slashコマンド処理を修正
 function handleSlashCommand(payload) {
   try {
     const view = {
       "type": "modal",
-      "callback_id": "test_modal",
+      "callback_id": "thanks_modal",
       "title": {
         "type": "plain_text",
-        "text": "テスト",
+        "text": "感謝メッセージ",
         "emoji": true
       },
       "submit": {
@@ -150,9 +150,10 @@ function handleSlashCommand(payload) {
           "element": {
             "type": "plain_text_input",
             "action_id": "message_input",
+            "multiline": true,
             "placeholder": {
               "type": "plain_text",
-              "text": "メッセージを入力"
+              "text": "感謝のメッセージを入力してください"
             }
           },
           "label": {
@@ -160,11 +161,50 @@ function handleSlashCommand(payload) {
             "text": "メッセージ",
             "emoji": true
           }
+        },
+        {
+          "type": "input",
+          "block_id": "visibility_block",
+          "element": {
+            "type": "radio_buttons",
+            "action_id": "visibility_input",
+            "initial_option": {
+              "text": {
+                "type": "plain_text",
+                "text": "公開",
+                "emoji": true
+              },
+              "value": "public"
+            },
+            "options": [
+              {
+                "text": {
+                  "type": "plain_text",
+                  "text": "公開",
+                  "emoji": true
+                },
+                "value": "public"
+              },
+              {
+                "text": {
+                  "type": "plain_text",
+                  "text": "非公開",
+                  "emoji": true
+                },
+                "value": "private"
+              }
+            ]
+          },
+          "label": {
+            "type": "plain_text",
+            "text": "公開設定",
+            "emoji": true
+          }
         }
       ]
     };
 
-    const result = callSlackApi("views.open", {
+    const result = callSlackApi(SLACK_API.METHODS.VIEWS_OPEN, {
       trigger_id: payload.trigger_id,
       view: view
     });
@@ -285,15 +325,29 @@ function parsePayload(e) {
     throw new Error('無効なリクエストです');
   }
 
+  // application/x-www-form-urlencoded の場合
   if (e.postData.type === "application/x-www-form-urlencoded") {
     const params = {};
     e.postData.contents.split('&').forEach(pair => {
       const [key, value] = pair.split('=').map(decodeURIComponent);
       params[key] = value;
     });
+    
+    // payloadキーが存在する場合はJSONとしてパース
+    if (params.payload) {
+      return JSON.parse(params.payload);
+    }
+    
+    // スラッシュコマンドの場合
     params.type = "slash_command";
     return params;
   }
 
-  return JSON.parse(e.parameter.payload);
+  // JSON形式の場合
+  try {
+    return JSON.parse(e.postData.contents);
+  } catch (error) {
+    console.error('JSONパースエラー:', error);
+    throw new Error('無効なJSONペイロードです');
+  }
 } 
