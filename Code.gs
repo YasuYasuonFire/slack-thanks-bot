@@ -267,8 +267,11 @@ function handleSlashCommand(payload) {
 
     console.log('モーダルオープン結果:', result);
     
-    // 成功時は空のレスポンスを返す
-    return createJsonResponse({});
+    // 成功時はモーダルオープンメッセージを返す
+    return createJsonResponse({
+      "response_type": "ephemeral",
+      "text": "📝 モーダルが正常に開きました。"
+    });
 
   } catch (error) {
     console.error('Slashコマンド処理中にエラー:', error);
