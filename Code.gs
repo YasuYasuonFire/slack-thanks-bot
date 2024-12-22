@@ -130,7 +130,7 @@ function handleSlashCommand(payload) {
       "callback_id": "thanks_modal",
       "title": {
         "type": "plain_text",
-        "text": "感謝メッセージ",
+        "text": "サンクスメッセージ",
         "emoji": true
       },
       "submit": {
@@ -144,6 +144,23 @@ function handleSlashCommand(payload) {
         "emoji": true
       },
       "blocks": [
+        {
+          "type": "input",
+          "block_id": "recipient_block",
+          "element": {
+            "type": "users_select",
+            "action_id": "recipient_select",
+            "placeholder": {
+              "type": "plain_text",
+              "text": "メッセージを送る相手を選択"
+            }
+          },
+          "label": {
+            "type": "plain_text",
+            "text": "送信先",
+            "emoji": true
+          }
+        },
         {
           "type": "input",
           "block_id": "message_block",
@@ -171,7 +188,7 @@ function handleSlashCommand(payload) {
             "initial_option": {
               "text": {
                 "type": "plain_text",
-                "text": "公開",
+                "text": "公開（#thanks-boardチャンネルに投稿）",
                 "emoji": true
               },
               "value": "public"
@@ -180,7 +197,7 @@ function handleSlashCommand(payload) {
               {
                 "text": {
                   "type": "plain_text",
-                  "text": "公開",
+                  "text": "公開（#thanks-boardチャンネルに投稿）",
                   "emoji": true
                 },
                 "value": "public"
@@ -188,7 +205,7 @@ function handleSlashCommand(payload) {
               {
                 "text": {
                   "type": "plain_text",
-                  "text": "非公開",
+                  "text": "非公開（受信者にのみDMで送信）",
                   "emoji": true
                 },
                 "value": "private"
@@ -198,6 +215,45 @@ function handleSlashCommand(payload) {
           "label": {
             "type": "plain_text",
             "text": "公開設定",
+            "emoji": true
+          }
+        },
+        {
+          "type": "input",
+          "block_id": "anonymity_block",
+          "element": {
+            "type": "radio_buttons",
+            "action_id": "anonymity_input",
+            "initial_option": {
+              "text": {
+                "type": "plain_text",
+                "text": "記名（送信者の名前を表示）",
+                "emoji": true
+              },
+              "value": "named"
+            },
+            "options": [
+              {
+                "text": {
+                  "type": "plain_text",
+                  "text": "記名（送信者の名前を表示）",
+                  "emoji": true
+                },
+                "value": "named"
+              },
+              {
+                "text": {
+                  "type": "plain_text",
+                  "text": "匿名（送信者の名前を非表示）",
+                  "emoji": true
+                },
+                "value": "anonymous"
+              }
+            ]
+          },
+          "label": {
+            "type": "plain_text",
+            "text": "匿名設定",
             "emoji": true
           }
         }
@@ -221,21 +277,14 @@ function handleSlashCommand(payload) {
 function handleViewSubmission(payload) {
   try {
     console.log('=== View Submission処理開始 ===');
-    console.log('ペイロード全体:', JSON.stringify(payload, null, 2));
-
-    // 入力値の取得と検証
+    
     const values = payload.view.state.values;
-    const messageBlock = values.message_block;
-    const messageInput = messageBlock.message_input.value;
+    const messageInput = values.message_block.message_input.value;
+    const recipientId = values.recipient_block.recipient_select.selected_user;
+    const visibility = values.visibility_block.visibility_input.selected_option.value;
+    const anonymity = values.anonymity_block.anonymity_input.selected_option.value;
 
-    console.log('入力値:', {
-      messageBlock,
-      messageInput
-    });
-
-    // 入力値の検証
     if (!messageInput || messageInput.trim().length === 0) {
-      console.log('バリデーションエラー: メッセージが空');
       return createJsonResponse({
         response_action: "errors",
         errors: {
@@ -244,41 +293,36 @@ function handleViewSubmission(payload) {
       });
     }
 
-    // メッセージの送信処理
-    try {
-      console.log('メッセージ送信開始:', messageInput);
-      
-      const messageResult = callSlackApi(SLACK_API.METHODS.CHAT_POST_MESSAGE, {
+    const sender = anonymity === CONFIG.ANONYMITY.NAMED ? 
+      `<@${payload.user.id}>さんから` : 
+      "匿名さんから";
+
+    const messageText = `${sender}のサンクスメッセージ:\n${messageInput}`;
+
+    if (visibility === CONFIG.VISIBILITY.PUBLIC) {
+      // 公開メッセージの送信
+      callSlackApi(SLACK_API.METHODS.CHAT_POST_MESSAGE, {
         channel: CONFIG.CHANNELS.THANKS_BOARD,
-        text: messageInput,
+        text: `<@${recipientId}>さんへ\n${messageText}`,
         unfurl_links: false
       });
+    } else {
+      // DMの送信
+      const dmChannel = callSlackApi(SLACK_API.METHODS.CONVERSATIONS_OPEN, {
+        users: recipientId
+      });
       
-      console.log('メッセージ送信結果:', messageResult);
-
-      // 成功時は空のオブジェクトを返す
-      console.log('=== View Submission処理完了 - 成功 ===');
-      return createJsonResponse({});
-
-    } catch (sendError) {
-      console.error('メッセージ送信エラー:', sendError);
-      return createJsonResponse({
-        response_action: "errors",
-        errors: {
-          "message_block": "メッセージの送信に失敗しました"
-        }
+      callSlackApi(SLACK_API.METHODS.CHAT_POST_MESSAGE, {
+        channel: dmChannel.channel.id,
+        text: messageText,
+        unfurl_links: false
       });
     }
 
+    return createJsonResponse({});
+
   } catch (error) {
-    console.error('=== View Submission処理エラー ===');
-    console.error('エラー情報:', {
-      name: error.name,
-      message: error.message,
-      stack: error.stack
-    });
-    console.error('エラー時のペイロード:', JSON.stringify(payload, null, 2));
-    
+    console.error('=== View Submission処理エラー ===', error);
     return createJsonResponse({
       response_action: "errors",
       errors: {
