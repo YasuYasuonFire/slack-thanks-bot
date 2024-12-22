@@ -266,10 +266,16 @@ function handleSlashCommand(payload) {
     });
 
     console.log('モーダルオープン結果:', result);
-    return createJsonResponse({ ok: true });
+    
+    // 成功時は空のレスポンスを返す
+    return createJsonResponse({});
+
   } catch (error) {
     console.error('Slashコマンド処理中にエラー:', error);
-    return createJsonResponse({ ok: false, error: error.message });
+    return createJsonResponse({
+      "response_type": "ephemeral",
+      "text": "😢 申し訳ありません。エラーが発生しました。\nしばらく待ってから再度お試しください。"
+    });
   }
 }
 
@@ -297,13 +303,19 @@ function handleViewSubmission(payload) {
       `<@${payload.user.id}>さんから` : 
       "匿名さんから";
 
-    const messageText = `${sender}のサンクスメッセージ:\n${messageInput}`;
+    const messageText = visibility === CONFIG.VISIBILITY.PUBLIC ?
+      `🌟 <@${recipientId}> さんへ\n` +
+      `${sender}のありがとうメッセージが届いています ✉️\n\n` +
+      `「${messageInput}」`
+      :
+      `🌟 サンクスメッセージが届きました！\n` +
+      `${sender}のありがとうメッセージです ✉️\n\n` +
+      `「${messageInput}」`;
 
     if (visibility === CONFIG.VISIBILITY.PUBLIC) {
-      // 公開メッセージの送信
       callSlackApi(SLACK_API.METHODS.CHAT_POST_MESSAGE, {
         channel: CONFIG.CHANNELS.THANKS_BOARD,
-        text: `<@${recipientId}>さんへ\n${messageText}`,
+        text: messageText,
         unfurl_links: false
       });
     } else {
